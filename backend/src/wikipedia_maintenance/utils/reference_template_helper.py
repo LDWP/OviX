@@ -14,6 +14,16 @@ This file merges the correct, validated semantics of the original
 "hardened" implementation with later quality-of-life improvements
 (TTL-based YAML cache, stricter domain validation, factored-out
 helpers for site-domain correction and template rebuilding).
+
+LOCKED BEHAVIOR (per bot policy review):
+- |site= is NEVER added, modified, or corrected by archive-repair logic.
+- |consulté le= is NEVER added by archive-repair logic (reserved for humans).
+- "www." is NEVER stripped from any domain/site value.
+- Original parameter spacing/formatting is preserved EXACTLY as written
+  by the original contributor, both for existing parameters (untouched)
+  and for newly added parameters (matched to the template's own style).
+  This includes spacing on BOTH sides of '|' AND on BOTH sides of '='.
+  Bots must not perform whitespace-only "cleanup" edits.
 """
 
 from __future__ import annotations
@@ -108,9 +118,11 @@ class ReferenceTemplateHelper:
     TEMPLATES_SUPPORTING_BRISE_LE = {'lien web', 'ouvrage'}
 
     # Templates for which a |site= parameter is not semantically valid
-    # (e.g. a book has no "site"). generate_archive_repair_template must
-    # never auto-fill |site= for these, whether or not one was already
-    # present on a synthetic template built upstream.
+    # (e.g. a book has no "site"). Kept for reference/introspection only:
+    # archive-repair logic no longer touches |site= at all (see LOCKED
+    # BEHAVIOR at top of file), but this set is still used by
+    # generate_enriched_template (ReferenceEnricherAnalyzer path) and by
+    # informational helpers.
     # Books and chapters are physical/digital publications, not web sites.
     # Articles are journal articles, not web sites, and should not have |site= added.
     # Theses are academic documents, not web sites.
@@ -127,6 +139,8 @@ class ReferenceTemplateHelper:
     # ouvrage is included for archive repair context (when link is corrected)
     # NOTE: All names are lowercase for case-insensitive comparison.
     # lien archive is NOT included as it has different semantics (uses horodatage archive).
+    # NOTE: kept for use by generate_enriched_template only; archive-repair
+    # logic never adds |consulté le= (see LOCKED BEHAVIOR at top of file).
     TEMPLATES_SUPPORTING_CONSULTE_LE = {'lien web', 'article', 'ouvrage', 'chapitre', 'interview', 'podcast', 'vidéo', 'lien vidéo'}
 
     # Templates for which archive parameters (archive-url, archive-date)
@@ -153,9 +167,9 @@ class ReferenceTemplateHelper:
     }
 
     # Maps archive provider domains to their Wikipedia site names (with wikilinks).
-    # Used when the archive URL becomes the main link (can_promote_archive=True)
-    # in DeadLinkAnalyzer repair to set the |site= parameter to the archive provider's name.
-    # Only used for dead link repair, not for enrichment.
+    # NOTE: retained for potential future/other use (e.g. prose rendering),
+    # but archive-repair logic no longer writes |site= at all, so this
+    # mapping is no longer consulted from generate_archive_repair_template.
     ARCHIVE_DOMAIN_TO_SITE_NAME: Dict[str, str] = {
         'web.archive.org': '[[Internet Archive]]',
         'archive.org': '[[Internet Archive]]',
@@ -463,17 +477,28 @@ class ReferenceTemplateHelper:
         """
         Normalize a template name for consistent comparison across all sets.
 
-        Converts to lowercase and replaces underscores with spaces.
+        This normalization is faithful to MediaWiki's behavior for template names:
+        - Underscores and spaces are equivalent
+        - Multiple spaces are collapsed to single spaces
+        - Leading/trailing spaces are trimmed
+        - Case is normalized to lowercase
+
         This ensures that all set lookups (TEMPLATES_SUPPORTING_*, etc.)
         work consistently regardless of input format.
 
         Args:
-            name: Template name (e.g., "Lien web", "lien_web", "Lien_Web")
+            name: Template name (e.g., "Lien web", "lien_web", "Lien_Web", "Lien _ web")
 
         Returns:
-            Normalized lowercase name with spaces (e.g., "lien web")
+            Normalized lowercase name with single spaces (e.g., "lien web")
         """
-        return name.lower().replace('_', ' ')
+        # Replace underscores with spaces (MediaWiki treats them as equivalent)
+        with_spaces = name.replace('_', ' ')
+        # Convert to lowercase
+        lowercased = with_spaces.lower()
+        # Collapse multiple spaces to single space (MediaWiki behavior)
+        collapsed = ' '.join(lowercased.split())
+        return collapsed
 
     @staticmethod
     def _get_canonical_template_name(name: str) -> str:
@@ -483,13 +508,16 @@ class ReferenceTemplateHelper:
         Uses KNOWN_TEMPLATE_NAMES to map aliases to their canonical forms.
         If the name is not in the mapping, returns the normalized name as-is.
 
+        Uses _normalize_template_name for robust normalization (handles
+        multiple spaces, underscores, etc. consistently with MediaWiki behavior).
+
         Args:
-            name: Template name (e.g., "cite web", "Lien web", "lien_web")
+            name: Template name (e.g., "cite web", "Lien web", "lien_web", "Lien _ web")
 
         Returns:
             Canonical template name (e.g., "Lien web" for "cite web" if mapped)
         """
-        normalized = name.lower().replace('_', ' ')
+        normalized = ReferenceTemplateHelper._normalize_template_name(name)
         return ReferenceTemplateHelper.KNOWN_TEMPLATE_NAMES.get(normalized, normalized)
 
     @staticmethod
@@ -503,10 +531,26 @@ class ReferenceTemplateHelper:
         return None
 
     # Parses `key=value` pairs from *top-level* pipe-separated segments
-    # only (see _split_top_level). Kept simple: segments are pre-split
-    # respecting nested {{ }} and [[ ]], so this just splits on the
-    # first '=' within a segment.
-    _PARAM_KV_RE = re.compile(r'^\s*([^=]+?)\s*=\s*(.*)$', re.DOTALL)
+    # only (see _split_top_level). Segments are pre-split respecting
+    # nested {{ }} and [[ ]].
+    #
+    # IMPORTANT (spacing fidelity): this regex captures, as SEPARATE named
+    # groups, the whitespace immediately before the '=' (eq_before) and
+    # immediately after it (eq_after), instead of silently discarding
+    # them via a blanket '\s*=\s*'. This is what allows _rebuild_template
+    # to reproduce "titre = Sound" (spaced) as-is instead of collapsing
+    # it to "titre=Sound" (compact) when a template is only partially
+    # touched (e.g. only archive-url/archive-date/brisé le added).
+    #
+    # `key` itself is captured non-greedily with no surrounding space:
+    # any leading whitespace on the segment (i.e. whitespace right after
+    # the previous '|') is left for the caller to inspect separately
+    # (see the after_pipe handling in _rebuild_template / the leading
+    # '\s*' consumed here for _parse_template_parameters purposes).
+    _PARAM_KV_RE = re.compile(
+        r'^\s*(?P<key>[^=]+?)(?P<eq_before>[ \t]*)=(?P<eq_after>[ \t]*)(?P<value>.*)$',
+        re.DOTALL,
+    )
 
     def __init__(self) -> None:
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
@@ -685,8 +729,15 @@ class ReferenceTemplateHelper:
                     self._logger.info(f"PARAM_PARSE_SKIPPED_SEGMENT | segment={segment[:80]!r}")
                 continue
 
-            key = kv.group(1).strip()
-            value = kv.group(2).strip()
+            key = kv.group('key').strip()
+            # `value` already excludes the whitespace right after '='
+            # (captured separately as eq_after) and any leading whitespace
+            # of the segment; it may still carry TRAILING whitespace that
+            # belongs to the boundary with the next '|' (that trailing
+            # whitespace is reproduced by _rebuild_template as the next
+            # parameter's before_pipe), so it must be stripped here to
+            # avoid storing/duplicating it in the semantic value.
+            value = kv.group('value').rstrip()
             if not key:
                 continue
 
@@ -735,7 +786,16 @@ class ReferenceTemplateHelper:
 
     @classmethod
     def _split_top_level(cls, text: str) -> List[str]:
-        """Split text on '|' characters that aren't nested inside {{ }} or [[ ]]."""
+        """
+        Split text on '|' characters that aren't nested inside {{ }} or [[ ]].
+
+        NOTE: the '|' separator itself is consumed (not included in either
+        the preceding or following segment) — callers that need to
+        reconstruct exact original spacing around '|' must read the
+        leading whitespace of each returned segment (see _rebuild_template),
+        since that whitespace is everything that appeared between the
+        '|' and the parameter name in the original text.
+        """
         segments: List[str] = []
         depth_curly = 0
         depth_bracket = 0
@@ -791,10 +851,25 @@ class ReferenceTemplateHelper:
     ) -> str:
         """
         Generate a reference template string with archive parameters added
-        (archive-url, archive-date, brisé le, consulté le, site).
+        (archive-url, archive-date, brisé le).
 
         This method is specifically for DeadLinkAnalyzer to add archive
         parameters to templates when repairing dead links.
+
+        LOCKED BEHAVIOR (per bot policy review — do not re-enable without
+        explicit consensus):
+        - |site= is NEVER added, modified, or "corrected" here. A human
+          contributor's choice of site value (including a bare domain,
+          with or without "www.") must be left exactly as written.
+        - |consulté le= is NEVER added here. That parameter documents a
+          human's own consultation of the source and must not be filled
+          in by a bot, even if the bot itself fetched the page.
+        - All parameters that are NOT being touched by this repair keep
+          their EXACT original formatting (spacing around '|' AND '='),
+          reproduced verbatim from original_template.full_match. Newly
+          added parameters (archive-url, archive-date, brisé le) use the
+          same spacing style as the template's own existing parameters,
+          so the result blends in rather than forcing a different style.
 
         Args:
             original_template: Original parsed template
@@ -852,25 +927,13 @@ class ReferenceTemplateHelper:
         )
         params['url'] = archive_url if can_promote_archive else original_url
 
-        # When adding an archive in dead link repair, update site parameter to reflect archive provider
-        # This is necessary because the source has changed from original site to archive site
-        # Only replace the site with archive provider site when the archive is promoted as the main link
-        # AND the template supports the site parameter
-        # Use _resolve_site_display_name for strict validation and mapping consistency
-        # Note: série/collection/éditeur check is not needed here because:
-        # - site is only updated when can_promote_archive is true (archive becomes main link)
-        # - In that case, the archive provider site is semantically correct and does not duplicate
-        #   manually curated parameters like série/collection/éditeur
-        if can_promote_archive and normalized_template_name not in self.TEMPLATES_WITHOUT_SITE_PARAM:
-            archive_domain = self._safe_extract_domain(archive_url)
-            if archive_domain:
-                archive_site_name = self._resolve_site_display_name(archive_domain, include_archive_domains=True)
-                if archive_site_name and archive_site_name != archive_domain:
-                    old_site = params.get('site', 'none')
-                    self._logger.info(f"ARCHIVE_SITE_UPDATE | template={original_template.template_name} | old_site={old_site} | archive_domain={archive_domain} | archive_site={archive_site_name} | reason=archive_promoted_as_main_link")
-                    params['site'] = archive_site_name
+        # LOCKED: |site= is never touched by archive-repair logic.
+        # (Previously this block updated |site= to the archive provider's
+        # name when the archive was promoted as the main link. Disabled
+        # per policy: bots must not overwrite a contributor's site choice.)
 
         # Only add archive-url and archive-date if template supports them
+        formatted_archive_date = ""
         if supports_archive_params:
             params['archive-url'] = archive_url
 
@@ -878,9 +941,10 @@ class ReferenceTemplateHelper:
             if formatted_archive_date:
                 params['archive-date'] = formatted_archive_date
 
-        # Get current date for brisé le and consulté le
-        # Use consulted_date if provided, otherwise use current date
-        # Format as French prose (e.g., "12 septembre 2026")
+        # Get current date for brisé le, formatted as French prose
+        # (e.g., "12 septembre 2026"). consulté le is never added here
+        # (see LOCKED BEHAVIOR above), so this date is only used for
+        # brisé le.
         if consulted_date:
             current_date = self._format_date_prose(consulted_date)
         else:
@@ -896,16 +960,10 @@ class ReferenceTemplateHelper:
             and 'lien brisé' not in params):
             params['brisé le'] = current_date
 
-        # Add consultation date if not already present AND template supports this parameter
-        # Only web resources that are consulted online should have consulté le
-        # consulté le should only be added if archive-url and archive-date are being added
-        # (i.e., the link is being corrected with an archive)
-        # Note: lire en ligne, accès url, and présentation en ligne are URL parameters,
-        # not date parameters, so they don't conflict with consulté le
-        if (supports_archive_params
-            and 'consulté le' not in params
-            and normalized_template_name in self.TEMPLATES_SUPPORTING_CONSULTE_LE):
-            params['consulté le'] = current_date
+        # LOCKED: |consulté le= is never added by archive-repair logic.
+        # (Previously this block added a consultation date. Disabled per
+        # policy: this parameter is reserved for human contributors who
+        # actually consulted the source themselves.)
 
         if provider:
             # Resolved/logged for traceability only. Deliberately NOT
@@ -922,62 +980,16 @@ class ReferenceTemplateHelper:
         for stale_key in ('dead-url', 'deadurl'):
             params.pop(stale_key, None)
 
-        # Templates without a valid |site= (e.g. 'ouvrage') must never
-        # have one auto-filled OR carried over from a pre-existing
-        # synthetic value — a book has no "site".
-        site_not_applicable = normalized_template_name in self.TEMPLATES_WITHOUT_SITE_PARAM
-        if site_not_applicable:
-            params.pop('site', None)
-        # Check all site parameter variants (site, website, périodique, work) for consistency
-        # If any of these are already present, skip auto-filling site to avoid duplication
-        elif not any(variant in params for variant in self.SITE_PARAMETER_VARIANTS):
-            # Only auto-fill site parameter if not already present.
-            # Never touch 'série' or 'collection' parameters - they are manually curated.
-            # Policy: FEW ENRICHMENTS + ZERO UNRELATED CHANGES - conservative blocking
-            # Check both lowercase and capitalized variants
-            série = params.get('série') or params.get('Série')
-            collection = params.get('collection') or params.get('Collection')
-            editeur = params.get('éditeur') or params.get('Éditeur')
-            if série or collection or editeur:
-                self._logger.info(f"ARCHIVE_SITE_SKIPPED | template={original_template.template_name} | reason=manually_curated_params_present")
-            else:
-                original_domain = self._safe_extract_domain(original_url)
-                if original_domain:
-                    site_value = self._resolve_site_display_name(original_domain)
-                    # Guard: only accept mapped wikilinks ([[...]]), never raw/unmapped domains
-                    if site_value and site_value.strip().startswith('[['):
-                        # Check if titre already contains the site name to avoid duplication
-                        # Normalize for comparison (case-insensitive, remove brackets and www)
-                        site_clean = site_value.strip().lower().replace('www.', '').replace('[[', '').replace(']]', '')
-                        titre = params.get('titre')
-                        if titre:
-                            titre_clean = titre.strip().lower().replace('www.', '').replace('[[', '').replace(']]', '')
-                            if site_clean == titre_clean or site_clean in titre_clean or titre_clean in site_clean:
-                                self._logger.info(f"ARCHIVE_SITE_SKIPPED | template={original_template.template_name} | reason=titre_contains_site_name")
-                            else:
-                                params['site'] = site_value
-                        else:
-                            params['site'] = site_value
-                    else:
-                        self._logger.info(f"ARCHIVE_SITE_SKIPPED | template={original_template.template_name} | reason=domain_not_mapped_not_wikilink")
-        elif 'site' in params:
-            # Resolve a raw domain already sitting in |site= to its
-            # display name too, so a value written upstream (e.g. by
-            # BareUrlHelper) is rendered consistently with the case where
-            # this method fills |site= itself. _correct_site_domain
-            # returns None when no correction is needed/possible, so
-            # this can only normalize a raw domain, never corrupt a
-            # deliberately curated value.
-            existing_site = params['site']
-            corrected_site = self._correct_site_domain(existing_site)
-            if corrected_site:
-                self._logger.info(
-                    f"ARCHIVE_SITE_CORRECTION | template={original_template.template_name} | "
-                    f"existing_site={existing_site} | new_site={corrected_site}"
-                )
-                params['site'] = corrected_site
+        # LOCKED: |site= is never added, corrected, or removed here.
+        # (Previously this block auto-filled |site= for templates missing
+        # it, and "corrected" existing |site= values including stripping
+        # "www.". Both are disabled per policy: a bot must not perform
+        # this kind of cosmetic/interpretive edit to a contributor's
+        # reference, and www.-stripping is not reliably safe — not every
+        # www. domain has a working non-www redirect.)
 
-        # Rebuild template with updated parameters, preserving original order.
+        # Rebuild template with updated parameters, preserving original
+        # order AND original spacing exactly (see _rebuild_template).
         new_template = self._rebuild_template(original_template.template_name, original_template.full_match, params)
 
         self._logger.info(
@@ -992,41 +1004,164 @@ class ReferenceTemplateHelper:
     def _rebuild_template(self, template_name: str, original_full_match: str, params: Dict[str, str]) -> str:
         """
         Rebuild a template string with updated parameters while preserving
-        the original parameter order (e.g. so `format=pdf` doesn't jump to
-        the end of the template just because it was touched).
+        the original parameter order AND EXACT original spacing style —
+        on BOTH sides of '|' AND on BOTH sides of '=' AND the original
+        template name casing (e.g., "lien web" stays "lien web", never
+        changed to "Lien web").
+
+        This method must never perform whitespace "cleanup": if the
+        original template was written compact (|url=...|titre=...), the
+        rebuilt output stays compact. If the original used spaced pipes
+        and/or spaced equals (| titre = Sound | url = ...), the rebuilt
+        output keeps that spacing — both for parameters that already
+        existed (untouched, byte-for-byte spacing) and for brand-new
+        parameters being added by a repair (matched to the template's own
+        detected style).
+
+        SAFETY: every emitted parameter is guaranteed to be preceded by a
+        literal '|' character and to contain a literal '=' character.
+        Both separators are added unconditionally by this method (never
+        derived from parsed spacing alone — only the whitespace AROUND
+        them is), so a parsing edge case can never cause a separator to
+        be silently dropped and parameters/keys/values to run together.
 
         Args:
-            template_name: Name of the template
-            original_full_match: Original template string for parameter order extraction
-            params: Updated parameter dictionary
+            template_name: Name of the template (used for validation, but
+                original casing is extracted from original_full_match)
+            original_full_match: Original template string (including {{ and }})
+                used to recover parameter order, spacing, and original template name casing.
+            params: Updated parameter dictionary (key -> value) to emit.
 
         Returns:
-            Rebuilt template string with parameters in original order plus any new ones.
+            Rebuilt template string with parameters in original order plus
+            any new ones, using spacing consistent with the original
+            template's own style, and preserving the original template name casing.
         """
-        template_parts = [f'{{{{{template_name}']
+        # Extract original template name with exact casing from original_full_match
+        # This ensures we preserve the original casing (e.g., "lien web" stays "lien web")
+        original_template_name = None
+        if original_full_match and original_full_match.startswith('{{'):
+            # Extract the template name between {{ and first | or }}
+            template_content = original_full_match[2:]  # Remove {{
+            first_pipe_idx = template_content.find('|')
+            first_brace_idx = template_content.find('}}')
+            
+            if first_pipe_idx >= 0 and first_brace_idx >= 0:
+                # Both | and }} present, use the first one
+                end_idx = min(first_pipe_idx, first_brace_idx)
+            elif first_pipe_idx >= 0:
+                end_idx = first_pipe_idx
+            elif first_brace_idx >= 0:
+                end_idx = first_brace_idx
+            else:
+                end_idx = len(template_content)
+            
+            original_template_name = template_content[:end_idx].strip()
+        
+        # Use original template name if found, otherwise fall back to provided template_name
+        final_template_name = original_template_name if original_template_name else template_name
+        
+        template_parts = [f'{{{{{final_template_name}']
 
-        # Get original parameter order from the template's full_match
-        original_param_order = []
-        if original_full_match:
+        original_param_order: List[str] = []
+        # Maps param name -> (whitespace_before_pipe, whitespace_after_pipe),
+        # the exact whitespace that appeared on each side of the '|' in
+        # the original text (either or both may be '').
+        original_pipe_spacing: Dict[str, Tuple[str, str]] = {}
+        default_pipe_spacing: Tuple[str, str] = ('', '')
+
+        # Maps param name -> (whitespace_before_equals, whitespace_after_equals),
+        # the exact whitespace that appeared on each side of the '=' in
+        # the original text (either or both may be ''). This is what makes
+        # "titre = Sound" survive as "titre = Sound" (not "titre=Sound")
+        # even when the template is only partially modified.
+        original_eq_spacing: Dict[str, Tuple[str, str]] = {}
+        default_eq_spacing: Tuple[str, str] = ('', '')
+
+        if original_full_match and original_full_match.startswith('{{') and original_full_match.endswith('}}'):
             template_content = original_full_match[2:-2]  # Remove {{ and }}
             segments = self._split_top_level(template_content)
-            for segment in segments[1:]:  # Skip template name
+            # IMPORTANT: _split_top_level consumes the '|' separator itself
+            # and does not redistribute it to either side. In real wikitext
+            # such as "{{Lien web |langue=en |titre=...}}", the whitespace
+            # that visually sits "after the |" (e.g. "web |langue") is
+            # actually trailing whitespace of the PRECEDING segment
+            # ("Lien web ") — NOT leading whitespace of the following
+            # segment ("langue=en "). So the correct prefix for parameter
+            # N is the trailing whitespace of segment N-1 (segments[i-1]),
+            # not the leading whitespace of segment N.
+            for i in range(1, len(segments)):  # Skip template name (index 0)
+                segment = segments[i]
                 kv = self._PARAM_KV_RE.match(segment)
                 if kv:
-                    param_name = kv.group(1).strip()
+                    param_name = kv.group('key').strip()
                     original_param_order.append(param_name)
 
-        # Add parameters in original order
+                    # --- Spacing around '|' ---
+                    # Full separator = trailing whitespace of the PRECEDING
+                    # segment (whitespace before the '|', e.g. "ouvrage ")
+                    # PLUS leading whitespace of THIS segment (whitespace
+                    # after the '|', e.g. " auteur"). Both sides are
+                    # captured independently since wikitext authors may
+                    # use either or both styles ("|x=", "| x=", "x= |", etc.).
+                    preceding_segment = segments[i - 1]
+                    trail_match = re.search(r'[ \t]*$', preceding_segment)
+                    before_pipe = trail_match.group(0) if trail_match else ''
+                    lead_match = re.match(r'^[ \t]*', segment)
+                    after_pipe = lead_match.group(0) if lead_match else ''
+                    original_pipe_spacing[param_name] = (before_pipe, after_pipe)
+
+                    # --- Spacing around '=' ---
+                    # Captured directly from the parsed key=value match:
+                    # eq_before is the whitespace between the key and '=',
+                    # eq_after is the whitespace between '=' and the value.
+                    # E.g. for "titre = Sound", eq_before=' ', eq_after=' '.
+                    # For "titre=Sound", both are ''.
+                    eq_before = kv.group('eq_before')
+                    eq_after = kv.group('eq_after')
+                    original_eq_spacing[param_name] = (eq_before, eq_after)
+
+            if original_param_order:
+                # Use the last existing parameter's own spacing as the
+                # style to apply to brand-new parameters, since it best
+                # reflects this specific template's actual formatting.
+                last_param = original_param_order[-1]
+                default_pipe_spacing = original_pipe_spacing.get(last_param, ('', ''))
+                default_eq_spacing = original_eq_spacing.get(last_param, ('', ''))
+
+        # Re-emit existing parameters in their original order, with their
+        # exact original spacing on BOTH sides of the '|' AND BOTH sides
+        # of the '=' — untouched. E.g. "ouvrage | auteur = Dupont | éditeur=..."
+        # has whitespace both before and after each '|' and around the
+        # '=' of 'auteur'; "Lien web |langue=en" has whitespace only before
+        # the '|'; "url=...|site=..." has none at all anywhere. The '|'
+        # and '=' themselves are always added literally here, independent
+        # of whatever the captured spacing contains, so neither separator
+        # can ever be silently dropped.
         emitted = set()
         for param in original_param_order:
             if param in params:
-                template_parts.append(f'|{param}={params[param]}')
+                before_pipe, after_pipe = original_pipe_spacing.get(param, default_pipe_spacing)
+                eq_before, eq_after = original_eq_spacing.get(param, default_eq_spacing)
+                template_parts.append(
+                    before_pipe + '|' + after_pipe
+                    + param + eq_before + '=' + eq_after + params[param]
+                )
                 emitted.add(param)
 
-        # Add any new parameters (archive-url, archive-date, etc.) that weren't in original
+        # Brand-new parameters (e.g. archive-url, archive-date, brisé le)
+        # not present in the original template use the detected default
+        # spacing style (for both '|' and '='), so they visually match the
+        # template's own style rather than forcing compact or spaced
+        # formatting onto it.
         for param, value in params.items():
             if param not in emitted:
-                template_parts.append(f'|{param}={value}')
+                before_pipe, after_pipe = default_pipe_spacing
+                eq_before, eq_after = default_eq_spacing
+                template_parts.append(
+                    before_pipe + '|' + after_pipe
+                    + param + eq_before + '=' + eq_after + value
+                )
 
         template_parts.append('}}')
         return ''.join(template_parts)
@@ -1043,21 +1178,30 @@ class ReferenceTemplateHelper:
         Correct an existing |site= value by extracting the domain and
         mapping it to a human-readable name.
 
+        NOTE: this method is retained for use by generate_enriched_template
+        (the ReferenceEnricherAnalyzer path), NOT by archive-repair logic
+        (generate_archive_repair_template never calls this — see LOCKED
+        BEHAVIOR at top of file).
+
         Handles:
         - Full URLs (extracts domain)
-        - Domains with a "www." prefix (removes it)
         - Domain -> human-readable name mapping via YAML
 
-        IMPORTANT: Only returns a value if a mapping is found (wikilink format).
-        Never returns a bare domain - this maintains the "only if mapped" contract
-        consistent with DeadLinkAnalyzer's _resolve_mapped_site_from_domain_string.
+        IMPORTANT:
+        - Only returns a value if a mapping is found (wikilink format).
+          Never returns a bare domain.
+        - NEVER strips "www." from the domain: not every "www." domain
+          has a working non-www redirect, and doing so is a cosmetic
+          change to what the contributor wrote. "www." is preserved
+          verbatim in both the lookup and any returned value.
 
         Args:
             existing_site: Current site parameter value (may be a URL,
                 a bare domain, or an already human-readable name).
 
         Returns:
-            Corrected site value (wikilink format if mapped), or None if no correction needed/possible.
+            Corrected site value (wikilink format if mapped), or None if
+            no correction needed/possible.
         """
         if not existing_site:
             return None
@@ -1072,28 +1216,21 @@ class ReferenceTemplateHelper:
             return None
 
         # Extract domain from URL, or use as-is if it's already a domain.
-        # Keep www. for now so we can detect if it needs to be stripped later
+        # "www." (if present) is always preserved — never stripped.
         if '://' in existing_site:
             parsed = urlparse(existing_site)
-            domain_with_www = parsed.netloc
+            domain = parsed.netloc
         else:
-            domain_with_www = existing_site.strip()
+            domain = existing_site.strip()
 
-        # DISABLED: Remove www. for mapping lookup - preserve www
-        domain = domain_with_www  # Keep www prefix
-
-        # Try to get the mapped site name for the corrected domain.
+        # Try to get the mapped site name for the domain, www. preserved.
         corrected_site = self._resolve_site_display_name(domain)
 
-        # If we got a wikilink (mapped value), return it
+        # Only return a value if we got an actual wikilink mapping.
+        # Never fall back to stripping "www." as a "correction" — that is
+        # not this method's job and is explicitly disallowed.
         if corrected_site and corrected_site.strip().startswith('[['):
             return corrected_site
-
-        # If no mapping found but www. was present, still strip the prefix
-        # This maintains the "only if mapped" contract for wikilinks while
-        # still cleaning up bare domains by removing www.
-        if domain_with_www.startswith('www.') and domain != domain_with_www:
-            return domain
 
         return None
 
@@ -1102,11 +1239,17 @@ class ReferenceTemplateHelper:
         Best-effort lookup of a human-readable site name for |site=,
         given a bare domain (e.g. "music.apple.com").
 
-        Looks up domain_to_site_name from YAML first with the domain exactly as
-        given, then with a "www." prefix stripped (covers both
-        "www.example.com" and "example.com" entries interchangeably).
-        Falls back to returning the domain without www when nothing
-        matches in the mapping.
+        Looks up domain_to_site_name from YAML first with the domain exactly
+        as given (www. preserved), then with a "www." prefix stripped ONLY
+        for the purpose of matching an entry that was itself defined
+        without www. in the YAML (covers both "www.example.com" and
+        "example.com" entries interchangeably in the *mapping*, without
+        ever altering what gets returned when nothing matches).
+
+        IMPORTANT: the final fallback (nothing matched in the YAML mapping)
+        returns the domain completely UNCHANGED, "www." included. This
+        method must never strip "www." from a value it doesn't have an
+        explicit, curated replacement for.
 
         The YAML mapping contains wiki link format [[Site Name]] which is preserved.
 
@@ -1135,7 +1278,9 @@ class ReferenceTemplateHelper:
             return domain
 
         # Normalize domain to lowercase for consistent matching
-        # (YAML entries are lowercase).
+        # (YAML entries are lowercase). This is a comparison-only
+        # normalization; the original "domain" (with its original case
+        # and its "www." if any) is what gets returned on no-match.
         domain_lower = domain.lower()
 
         # Check archive provider mapping ONLY if explicitly requested (dead link repair context)
@@ -1164,7 +1309,9 @@ class ReferenceTemplateHelper:
                 return str(inner) if inner else domain
             return str(mapped)
 
-        # Try without www prefix from YAML.
+        # Try matching a YAML entry that was defined without "www.",
+        # purely for lookup purposes — does not affect what is returned
+        # below if nothing matches.
         if domain_lower.startswith('www.'):
             domain_without_www = domain_lower[len('www.'):]
             mapped = ReferenceTemplateHelper.DOMAIN_TO_SITE_NAME.get(domain_without_www)
@@ -1176,10 +1323,10 @@ class ReferenceTemplateHelper:
                     return str(inner) if inner else domain_without_www
                 return str(mapped)
 
-        # Fallback: return domain without www (no wiki link brackets).
-        if domain.startswith('www.'):
-            return domain[len('www.'):]
-
+        # Fallback: return the domain completely unchanged, "www." included.
+        # Never strip "www." here — not every www. domain redirects
+        # correctly without it, and this must remain a purely additive
+        # (mapping-only) operation.
         return domain
 
     def _format_archive_date(self, archive_date: Optional[str]) -> str:
@@ -1228,7 +1375,13 @@ class ReferenceTemplateHelper:
         (site and/or consulté le) added, preserving all existing parameters.
 
         This method is specifically for ReferenceEnricherAnalyzer to add
-        missing site and consulté le parameters to healthy reference templates.
+        missing site and consulté le parameters to healthy reference
+        templates — it is a DIFFERENT code path from
+        generate_archive_repair_template (used by DeadLinkAnalyzer), and
+        the LOCKED BEHAVIOR restrictions on |site=/|consulté le= documented
+        there do NOT apply here, since this method is only invoked when
+        the caller (a human-reviewed enrichment workflow) explicitly
+        supplies a site_value/consulte_le_value to add.
 
         Args:
             original_template: Original parsed template
@@ -1258,7 +1411,7 @@ class ReferenceTemplateHelper:
             site_needs_correction = False
         else:
             # Check if site needs domain mapping correction (broader than just www. prefix)
-            site_needs_correction = current_site and ('://' in current_site or current_site.strip().startswith('www.') or '.' in current_site.strip())
+            site_needs_correction = bool(current_site) and ('://' in current_site or current_site.strip().startswith('www.') or '.' in current_site.strip())
 
         # If both parameters are already present and non-empty, no enrichment needed
         # unless site needs domain mapping correction
@@ -1274,6 +1427,7 @@ class ReferenceTemplateHelper:
         params = dict(original_template.parameters)  # shallow copy; safe, immutable source
 
         # Correct domain mapping in existing site value if present.
+        # (www. is never stripped — see _correct_site_domain.)
         if site_needs_correction:
             corrected_site = self._correct_site_domain(current_site)
             if corrected_site:
@@ -1336,7 +1490,8 @@ class ReferenceTemplateHelper:
             else:
                 self._logger.info(f"ENRICHMENT_CONSULTE_LE_SKIPPED | template={original_template.template_name} | reason=site_value_provided_but_not_added_or_corrected")
 
-        # Rebuild template with updated parameters.
+        # Rebuild template with updated parameters, preserving original
+        # order and spacing (see _rebuild_template).
         new_template = self._rebuild_template(original_template.template_name, original_template.full_match, params)
 
         self._logger.info(
@@ -1399,7 +1554,8 @@ class ReferenceTemplateHelper:
         params['brisé le'] = brise_le_date
         self._logger.info(f"BRISE_LE_ADDED | template={original_template.template_name} | brise_le={brise_le_date}")
 
-        # Rebuild template with brisé le parameter added.
+        # Rebuild template with brisé le parameter added, preserving
+        # original order and spacing (see _rebuild_template).
         new_template = self._rebuild_template(original_template.template_name, original_template.full_match, params)
 
         self._logger.info(
@@ -1429,7 +1585,6 @@ class ReferenceTemplateHelper:
 
         Titre, « Texte du lien » [archive du 1er janvier 2020],
         sur original-site.com via Internet Archive, 5 janvier 2015
-        (consulté le 25 juillet 2026)
 
         - The title (if present) is quoted with French guillemets « ».
         - The link text points at the archive URL when `assume_patch_deployed`
@@ -1439,8 +1594,10 @@ class ReferenceTemplateHelper:
         - "archive du <date>" always uses the *archive* date, never the
           publication date.
         - "sur <site> via <provider>" uses the resolved provider name.
-        - Publication date (`date`/`année`) and "consulté le" are appended
-          when available.
+        - Publication date (`date`/`année`) is appended when available.
+          Consultation date is deliberately NOT appended here (see
+          DISABLED note below) — this is prose output for display/logging,
+          not wikitext, but is kept consistent with the same policy.
 
         Args:
             original_template: Parsed template (for titre/date/site/etc.)
@@ -1448,7 +1605,8 @@ class ReferenceTemplateHelper:
             archive_date: Archive date from provider (YYYYMMDDHHMMSS or YYYY-MM-DD)
             original_url: Original dead URL
             provider: Raw archive provider identifier (e.g. 'WaybackMachine')
-            consulted_date: Consultation date (YYYY-MM-DD); defaults to today (UTC)
+            consulted_date: Consultation date (YYYY-MM-DD); currently unused
+                (kept in the signature for backward compatibility).
             assume_patch_deployed: If True and the template supports it, the
                 link text points to the archive URL instead of the original.
 
@@ -1535,7 +1693,10 @@ class ReferenceTemplateHelper:
         if pub_date_prose:
             trailing.append(pub_date_prose)
 
-        # DISABLED: Auto-add consulté le date
+        # DISABLED: Auto-add consulté le date to prose output.
+        # This is intentionally never added — consultation date is
+        # reserved for human contributors, consistent with the wikitext
+        # generation policy in generate_archive_repair_template.
         # if not consulted_date:
         #     consulted_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         # consulted_prose = self._format_date_prose(consulted_date)

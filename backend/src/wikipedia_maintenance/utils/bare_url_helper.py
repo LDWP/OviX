@@ -445,7 +445,7 @@ class BareUrlHelper:
             return None
 
         # --- Resolve and validate the template name -------------------
-        normalized_key = template_name.strip().lower().replace('_', ' ')
+        normalized_key = template_helper._normalize_template_name(template_name)
         resolved_template_name = template_helper.KNOWN_TEMPLATE_NAMES.get(normalized_key)
         if resolved_template_name is None:
             # Not a recognized alias; accept it as-is only if it's an

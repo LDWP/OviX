@@ -54,6 +54,31 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 
+def _normalize_template_name(name: str) -> str:
+    """
+    Normalize a template name for consistent comparison.
+    
+    This normalization is faithful to MediaWiki's behavior for template names:
+    - Underscores and spaces are equivalent
+    - Multiple spaces are collapsed to single spaces
+    - Leading/trailing spaces are trimmed
+    - Case is normalized to lowercase
+    
+    Args:
+        name: Template name (e.g., "Lien web", "lien_web", "Lien_Web", "Lien _ web")
+    
+    Returns:
+        Normalized lowercase name with single spaces (e.g., "lien web")
+    """
+    # Replace underscores with spaces (MediaWiki treats them as equivalent)
+    with_spaces = name.replace('_', ' ')
+    # Convert to lowercase
+    lowercased = with_spaces.lower()
+    # Collapse multiple spaces to single space (MediaWiki behavior)
+    collapsed = ' '.join(lowercased.split())
+    return collapsed
+
+
 # ----------------------------------------------------------------------
 # Data classes
 # ----------------------------------------------------------------------
@@ -921,7 +946,7 @@ JSON normalisé :"""
                 continue
 
             raw_name = name_match.group(1).strip()
-            normalized_name = raw_name.lower().replace('_', ' ')
+            normalized_name = _normalize_template_name(raw_name)
             template_name = self.KNOWN_TEMPLATES.get(normalized_name)
 
             if template_name:

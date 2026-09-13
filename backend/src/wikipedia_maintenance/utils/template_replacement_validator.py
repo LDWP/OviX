@@ -94,7 +94,8 @@ class TemplateReplacementValidator:
         # Check that the new template has the same name as the old template
         # This prevents accidental replacement with a completely different template type
         # If a normalization function is provided, use it to allow legitimate conversions
-        # (e.g., cite web → Lien web) while still blocking unrelated changes
+        # (e.g., cite web → Lien web) while blocking unrelated changes AND
+        # preventing useless case-only changes (e.g., lien web → Lien web)
         old_template = old_content[old_template_start:old_template_end]
         old_template_name = TemplateReplacementValidator._extract_template_name(old_template)
         new_template_name = TemplateReplacementValidator._extract_template_name(new_template)
@@ -104,10 +105,18 @@ class TemplateReplacementValidator:
                 # Use normalization to allow legitimate conversions
                 old_normalized = normalize_name_func(old_template_name)
                 new_normalized = normalize_name_func(new_template_name)
+
+                # If normalized names differ, this is not a legitimate conversion
                 if old_normalized != new_normalized:
                     error_msg = f"Template validation failed: template name changed from {old_template_name} to {new_template_name} (normalized: {old_normalized} vs {new_normalized})"
                     logger.warning(error_msg)
                     return False, error_msg
+
+                # If normalized names are the same, allow the change
+                # Do NOT block case-only changes - the bot should not interfere
+                # with template name casing (lien web → Lien web is allowed)
+                # Different names but same normalized form = legitimate conversion (cite web → Lien web)
+                # This is also allowed
             else:
                 # Strict comparison when no normalization function provided
                 if old_template_name.lower() != new_template_name.lower():
@@ -207,11 +216,15 @@ class TemplateReplacementValidator:
         """
         Extract the template name from a template string.
 
+        This extracts the raw template name (before the first '|') without
+        any normalization. Normalization is handled by the normalize_name_func
+        passed to validate() if provided.
+
         Args:
             template: Template string (e.g., "{{Lien web|url=...}}")
 
         Returns:
-            Template name (e.g., "Lien web"), or None if extraction fails.
+            Raw template name (e.g., "Lien web"), or None if extraction fails.
         """
         if not template or not isinstance(template, str):
             return None
@@ -222,10 +235,9 @@ class TemplateReplacementValidator:
         else:
             return None
 
-        # The template name is everything before the first '|' or space
-        # Handle both {{name|...}} and {{name ...}} formats
-        for i, char in enumerate(inner):
-            if char in ('|', ' '):
-                return inner[:i]
-
-        return inner
+        # The template name is everything before the first '|'
+        pipe_idx = inner.find('|')
+        if pipe_idx >= 0:
+            return inner[:pipe_idx].strip()
+        else:
+            return inner

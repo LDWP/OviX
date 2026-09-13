@@ -222,7 +222,7 @@ class ReferenceEnricherAnalyzer(BaseAnalyzer):
         - Never auto-fill if série/collection present (manually curated context).
         """
         # Normalize template name for comparison to handle case/spacing variations
-        normalized_template_name = template.template_name.lower().replace('_', ' ')
+        normalized_template_name = self.reference_template_helper._normalize_template_name(template.template_name)
         if normalized_template_name in self.reference_template_helper.TEMPLATES_WITHOUT_SITE_PARAM:
             return None
 
@@ -362,7 +362,7 @@ class ReferenceEnricherAnalyzer(BaseAnalyzer):
         online-access parameter is present.
         """
         # Normalize template name for comparison to handle case/spacing variations
-        normalized_template_name = template.template_name.lower().replace('_', ' ')
+        normalized_template_name = self.reference_template_helper._normalize_template_name(template.template_name)
         if normalized_template_name in self.reference_template_helper.TEMPLATES_SUPPORTING_CONSULTE_LE:
             return True
 
