@@ -27,7 +27,7 @@ def test_normalize_template_name():
         ('Lien web', 'lien web'),
         ('lien web', 'lien web'),
         ('lien_web', 'lien web'),
-        ('Lien_Web', 'lien Web'),  # MediaWiki: first char lowercase only
+        ('Lien_Web', 'lien web'),
         ('Lien _ web', 'lien web'),
         ('  Lien  web  ', 'lien web'),
         ('Cite web', 'cite web'),

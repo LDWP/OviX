@@ -477,29 +477,30 @@ class ReferenceTemplateHelper:
         """
         Normalize a template name for consistent comparison across all sets.
 
-        This normalization is faithful to MediaWiki's behavior for template names:
+        This normalization handles variations for lookup purposes:
         - Underscores and spaces are equivalent
         - Multiple spaces are collapsed to single spaces
         - Leading/trailing spaces are trimmed
-        - Case is normalized to lowercase ONLY for the first character (MediaWiki behavior)
+        - Case is normalized to lowercase for lookup only
 
         This ensures that all set lookups (TEMPLATES_SUPPORTING_*, etc.)
         work consistently regardless of input format.
+
+        IMPORTANT: The actual template name casing is preserved by _rebuild_template
+        and by the canonical name mapping. This normalization is ONLY for lookup.
 
         Args:
             name: Template name (e.g., "Lien web", "lien_web", "Lien_Web", "Lien _ web")
 
         Returns:
-            Normalized name with single spaces and first character lowercase (e.g., "lien web")
+            Normalized lowercase name with single spaces (e.g., "lien web")
         """
-        # Replace underscores with spaces (MediaWiki treats them as equivalent)
+        # Replace underscores with spaces
         with_spaces = name.replace('_', ' ')
-        # Collapse multiple spaces to single space (MediaWiki behavior)
+        # Collapse multiple spaces to single space
         collapsed = ' '.join(with_spaces.split())
-        # Normalize only first character to lowercase (MediaWiki behavior)
-        if collapsed:
-            return collapsed[0].lower() + collapsed[1:]
-        return collapsed
+        # Convert to lowercase for lookup
+        return collapsed.lower()
 
     @staticmethod
     def _get_canonical_template_name(name: str) -> str:
