@@ -402,14 +402,9 @@ class DeadLinkAnalyzer(BaseAnalyzer):
         if not domain:
             return None
 
-        # Strip a leading "www." before attempting the mapping lookup, so
-        # that "www.exemple.com" and "exemple.com" both resolve against the
-        # same YAML entry and the mapping success rate improves. This only
-        # affects the LOOKUP KEY, not the fallback behavior: if no mapping is
-        # found for the stripped domain, we still return None below — never
-        # the stripped/raw domain itself. The "only if mapped" contract is
-        # unchanged.
-        domain_for_lookup = domain[4:] if domain.startswith('www.') else domain
+        # DISABLED: Strip a leading "www." before attempting the mapping lookup
+        # Preserve www prefix as requested by user
+        domain_for_lookup = domain  # Keep www prefix
 
         # Use the site name mapping from ReferenceTemplateHelper for human-readable names
         resolved = self.reference_template_helper._resolve_site_display_name(domain_for_lookup)
@@ -449,174 +444,19 @@ class DeadLinkAnalyzer(BaseAnalyzer):
 
     def _get_site_parameter_if_missing(self, template, url: str) -> Optional[Dict[str, str]]:
         """
-        If a reference template's |site= parameter is missing or empty,
-        return an extra_params dict with site filled from the domain of the
-        main link — but ONLY if that domain has a confirmed mapping (i.e. the
-        result is a wikilink "[[...]]"). An unmapped domain is NEVER written
-        as |site=, whether the parameter was missing or already present.
-
-        If site is already present but is a domain with a mapping, correct it.
-        If site is already present but is a domain WITHOUT a mapping, leave it
-        untouched (do not strip "www." or rewrite it to the bare domain —
-        that would still be writing an unmapped value).
-        If site is already present but is a plain name (e.g., "Twitter"), use
-        the URL to derive the correct domain and apply the mapping — again,
-        only if a mapping is found.
-        If site is already present and is a valid value (internal link), return None.
-
-        This is safer than mutating template.parameters in place.
-
+        DISABLED: Dead link module no longer modifies or adds the |site= parameter.
+        
+        This function now always returns None to prevent any modifications to the
+        site parameter in reference templates.
+        
         Args:
             template: Reference template
             url: Main link URL
 
         Returns:
-            Dict with site parameter if a MAPPED value is available and
-            differs from what's already there, None otherwise.
+            None (site parameter is never modified)
         """
-        # Normalize template name for comparison to handle case/spacing variations
-        normalized_template_name = self.reference_template_helper._normalize_template_name(template.template_name)
-
-        # Skip for templates that should NOT have |site= (e.g., ouvrage)
-        if normalized_template_name in self.reference_template_helper.TEMPLATES_WITHOUT_SITE_PARAM:
-            return None
-
-        # Check all site parameter variants (site, website, périodique, work) for consistency
-        # If any of these are already present, skip auto-filling site to avoid duplication
-        # Use the shared constant from ReferenceTemplateHelper for consistency
-        current_site = self._get_param_any(template.parameters, self.reference_template_helper.SITE_PARAMETER_VARIANTS)
-
-        # If site is already present
-        if current_site and current_site.strip():
-            # If it's already an internal link, check if it matches the current mapping
-            if current_site.strip().startswith('[['):
-                # Extract the correct site name from the URL using the current mapping.
-                # _extract_site_name_from_url only returns a value when mapped,
-                # so this comparison never introduces an unmapped value.
-                correct_site_from_url = self._extract_site_name_from_url(url)
-                if correct_site_from_url and correct_site_from_url != current_site.strip():
-                    logger.info(
-                        f"SITE_PARAMETER_CORRECTION | url={url} | template={template.template_name} | "
-                        f"existing_site={current_site} | new_site={correct_site_from_url} | "
-                        f"reason=wikilink_updated_to_match_mapping"
-                    )
-                    return {'site': correct_site_from_url}
-                logger.info(f"SITE_PARAMETER_SKIP | url={url} | existing_site={current_site} | reason=already_internal_link_matches_mapping")
-                return None
-
-            site_value = current_site.strip()
-
-            # Cas 1 : ressemble à un domaine ou une URL
-            if '://' in site_value or site_value.startswith('www.') or '.' in site_value:
-                from urllib.parse import urlparse
-                if '://' in site_value:
-                    parsed = urlparse(site_value)
-                    domain = parsed.netloc.replace('www.', '')
-                else:
-                    domain = site_value.replace('www.', '')
-
-                # Try to get mapped site name first
-                corrected_site = self._resolve_mapped_site_from_domain_string(domain)
-
-                if corrected_site and corrected_site != site_value:
-                    logger.info(
-                        f"SITE_PARAMETER_CORRECTION | url={url} | template={template.template_name} | "
-                        f"existing_site={current_site} | new_site={corrected_site} | "
-                        f"reason=domain_mapping_applied"
-                    )
-                    return {'site': corrected_site}
-                # If no mapping found but www. was present, still remove www. prefix (plain domain)
-                elif site_value.startswith('www.') and domain != site_value:
-                    logger.info(
-                        f"SITE_PARAMETER_CORRECTION | url={url} | template={template.template_name} | "
-                        f"existing_site={current_site} | new_site={domain} | "
-                        f"reason=remove_www_prefix_no_mapping"
-                    )
-                    return {'site': domain}
-
-                logger.info(f"SITE_PARAMETER_SKIP | url={url} | existing_site={current_site} | reason=domain_no_mapping")
-                return None
-
-            # Cas 2 : nom en clair (ex: "Twitter") — utiliser l'URL pour déduire le domaine correct
-            # Le mapping YAML ne contient que des domaines (twitter.com), pas des noms (Twitter)
-            # Donc on utilise l'URL pour obtenir le domaine et appliquer le mapping.
-            # _extract_site_name_from_url already only returns a value when mapped.
-            correct_site_from_url = self._extract_site_name_from_url(url)
-            if correct_site_from_url and correct_site_from_url != site_value:
-                logger.info(
-                    f"SITE_PARAMETER_CORRECTION | url={url} | template={template.template_name} | "
-                    f"existing_site={current_site} | new_site={correct_site_from_url} | "
-                    f"reason=plain_name_corrected_via_url_mapping"
-                )
-                return {'site': correct_site_from_url}
-
-            logger.info(f"SITE_PARAMETER_SKIP | url={url} | existing_site={current_site} | reason=human_readable_name_no_correction")
-            return None
-
-        # If site is missing, fill it from URL using the site name mapping.
-        # _extract_site_name_from_url only ever returns a mapped wikilink or
-        # None — so site_value here is guaranteed to be either a confirmed
-        # mapping or nothing.
-        site_value = self._extract_site_name_from_url(url)
-
-        if not site_value:
-            # Fallback: try to derive site from template title if the URL's
-            # domain gave no mapping. This is a best-effort heuristic and
-            # follows the exact same "only if mapped" contract: we only
-            # accept the result if _resolve_mapped_site_from_domain_string
-            # confirms a mapping. If the title doesn't look like a domain, or
-            # no mapping is found, we add nothing — never a raw/plain title.
-            title_variants = ('titre', 'title', 'Titre', 'Title')
-            title = self._get_param_any(template.parameters, title_variants)
-            if title and title.strip():
-                title_clean = title.strip()
-                if '.' in title_clean and ' ' not in title_clean:
-                    site_value = self._resolve_mapped_site_from_domain_string(title_clean)
-                    if site_value:
-                        logger.info(f"SITE_PARAMETER_FROM_TITLE | url={url} | title={title} | site={site_value}")
-                if not site_value:
-                    logger.info(f"SITE_PARAMETER_SKIP_NO_URL_MAPPING | url={url} | title={title} | reason=unreliable_title_to_site_mapping")
-            if not site_value:
-                return None
-
-        # Defensive: some upstream helpers may (incorrectly) return a list.
-        # Normalize before any further processing so downstream code never
-        # has to guess the type.
-        if isinstance(site_value, list):
-            site_value = str(site_value[0]) if site_value else None
-        if not site_value:
-            return None
-
-        # Check if série, collection, or éditeur has the same name as the potential site
-        # If so, skip adding site to avoid duplication
-        série = template.parameters.get('série')
-        collection = template.parameters.get('collection')
-        éditeur = template.parameters.get('éditeur') or template.parameters.get('Éditeur')
-
-        if série or collection or éditeur:
-            # Normalize for comparison (case-insensitive, remove brackets)
-            site_clean = site_value.strip().lower().replace('[[', '').replace(']]', '')
-
-            if série:
-                série_clean = série.strip().lower().replace('[[', '').replace(']]', '')
-                if site_clean == série_clean or site_clean in série_clean or série_clean in site_clean:
-                    logger.info(f"SITE_PARAMETER_SKIP_AUTO_FILL | url={url} | série={série} | reason=série_same_as_site")
-                    return None
-
-            if collection:
-                collection_clean = collection.strip().lower().replace('[[', '').replace(']]', '')
-                if site_clean == collection_clean or site_clean in collection_clean or collection_clean in site_clean:
-                    logger.info(f"SITE_PARAMETER_SKIP_AUTO_FILL | url={url} | collection={collection} | reason=collection_same_as_site")
-                    return None
-
-            if éditeur:
-                éditeur_clean = éditeur.strip().lower().replace('[[', '').replace(']]', '')
-                if site_clean == éditeur_clean or site_clean in éditeur_clean or éditeur_clean in site_clean:
-                    logger.info(f"SITE_PARAMETER_SKIP_AUTO_FILL | url={url} | éditeur={éditeur} | reason=éditeur_same_as_site")
-                    return None
-
-        logger.info(f"SITE_PARAMETER_AUTO_FILLED | url={url} | site={site_value}")
-        return {'site': site_value}
+        return None
 
     def _archive_content_looks_dead(self, archive_url: str) -> bool:
         """
@@ -1155,19 +995,7 @@ class DeadLinkAnalyzer(BaseAnalyzer):
 
                             # Generate updated template with new archive URL
                             if template:
-                                # Auto-fill |site= from the main link's domain if it was left empty
-                                # (only if a mapping is found — see _get_site_parameter_if_missing).
-                                extra_site_params = self._get_site_parameter_if_missing(template, url)
-                                if extra_site_params:
-                                    # Create a new template with merged parameters (ReferenceTemplate is frozen)
-                                    template = ReferenceTemplate(
-                                        template_name=template.template_name,
-                                        parameters={**template.parameters, **extra_site_params},
-                                        full_match=template.full_match,
-                                        start_position=template.start_position,
-                                        end_position=template.end_position,
-                                        is_supported=template.is_supported
-                                    )
+                                # DISABLED: Site parameter no longer added by dead link module
 
                                 new_template = self.reference_template_helper.generate_archive_repair_template(
                                     template,
@@ -1452,19 +1280,7 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                                 )
                                 continue
 
-                            # Auto-fill |site= from the main link's domain if it was left empty
-                            # (only if a mapping is found — see _get_site_parameter_if_missing).
-                            extra_site_params = self._get_site_parameter_if_missing(template, old_url)
-                            if extra_site_params:
-                                # Create a new template with merged parameters (ReferenceTemplate is frozen)
-                                template = ReferenceTemplate(
-                                    template_name=template.template_name,
-                                    parameters={**template.parameters, **extra_site_params},
-                                    full_match=template.full_match,
-                                    start_position=template.start_position,
-                                    end_position=template.end_position,
-                                    is_supported=template.is_supported
-                                )
+                            # DISABLED: Site parameter no longer added by dead link module
 
                             new_template = self.reference_template_helper.generate_archive_repair_template(
                                 template,
@@ -2080,7 +1896,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                                   archive_title: Optional[str] = None,
                                   archive_author: Optional[str] = None,
                                   ref: Optional[BareUrlRef] = None,
-                                  original_title: Optional[str] = None) -> Optional[str]:
+                                  original_title: Optional[str] = None,
+                                  disable_consulte_le: bool = False) -> Optional[str]:
         """
         Build a {{Lien web}} template with mode-specific behavior.
 
@@ -2096,6 +1913,7 @@ class DeadLinkAnalyzer(BaseAnalyzer):
             provider: Archive provider name (e.g., WaybackMachine, Arquivo.pt)
             archive_title: Title from archive metadata if available
             archive_author: Author from archive metadata if available
+            disable_consulte_le: If True, skip adding consulté le parameter
             ref: BareUrlRef for external_links mode (for text extraction)
             original_title: Original title from existing template (preserved over archive_title)
 
@@ -2125,11 +1943,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
             except (ValueError, TypeError):
                 continue
 
-        # Extract site name from URL for |site= parameter. This only ever
-        # returns a value when the domain has a confirmed mapping (see
-        # _extract_site_name_from_url) — an unmapped domain simply omits
-        # |site= from the built template rather than writing a raw domain.
-        site_value = self._extract_site_name_from_url(original_url)
+        # DISABLED: Site parameter no longer added by dead link module
+        site_value = None
 
         # Build template parts
         template_parts = ["Lien web"]
@@ -2157,8 +1972,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                 if not original_text:
                     url_pos = ref.context_text.find(original_url)
                     if url_pos > 0:
-                        before_text = ref.context_text[:url_pos].strip()
-                        before_text = before_text.replace('*', '').replace('#', '').strip()
+                        before_text = ref.context_text[:url_pos]  # DISABLED: strip() to preserve spaces
+                        before_text = before_text.replace('*', '').replace('#', '')  # DISABLED: strip() to preserve spaces
                         if before_text and len(before_text) > 2:
                             original_text = before_text
 
@@ -2188,9 +2003,10 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                     title_value = title_value + ' ' + ' '.join(f'({note})' for note in parenthetical_notes)
                 template_parts.append(f"titre={title_value}")
 
-            # Use consulté le instead of brisé le for external links
-            current_date = datetime.now().strftime('%Y-%m-%d')
-            template_parts.append(f"consulté le={current_date}")
+            # Use consulté le instead of brisé le for external links (unless disabled)
+            if not disable_consulte_le:
+                current_date = datetime.now().strftime('%Y-%m-%d')
+                template_parts.append(f"consulté le={current_date}")
 
         else:
             # Dead link mode: prioritize original title over archive title
@@ -2308,7 +2124,7 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                 if is_external_links_section:
                     # Dedicated logic for Liens externes section:
                     # - No brisé le=
-                    # - Keep consulté le=
+                    # - DISABLED: No consulté le=
                     # - Preserve original link text/titre over archive title
                     # - Preserve parenthetical notes
                     template_str = self._build_lien_web_template(
@@ -2319,17 +2135,13 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                         provider=provider,
                         archive_title=archive_title,
                         archive_author=archive_author,
-                        ref=matching_ref
+                        ref=matching_ref,
+                        disable_consulte_le=True
                     )
                 else:
                     # Standard logic for references section
-                    # Auto-fill |site= from the main link's domain when building a
-                    # brand-new {{Lien web}} template, since a bare URL has no
-                    # existing |site= to preserve. This only ever produces a
-                    # value when the domain has a confirmed mapping — an
-                    # unmapped domain simply means no |site= is added at all.
-                    site_value = self._extract_site_name_from_url(old_url)
-                    extra_params = {'site': site_value} if site_value else None
+                    # DISABLED: Site parameter no longer added by dead link module
+                    extra_params = None
 
                     # Add author if available from archive metadata
                     if archive_author:

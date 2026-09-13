@@ -298,8 +298,8 @@ class ReferenceEnricherAnalyzerConfig:
     timeout: float = 10.0  # Link check timeout in seconds
     max_retries: int = 3  # Maximum retry attempts
     max_checks_per_article: int = 50  # Maximum URLs to check per article
-    enable_site_fill: bool = True  # Whether to auto-fill |site= parameter
-    enable_consulte_le_fill: bool = True  # Whether to auto-fill |consulté le= parameter
+    enable_site_fill: bool = False  # DISABLED: Whether to auto-fill |site= parameter
+    enable_consulte_le_fill: bool = False  # DISABLED: Whether to auto-fill |consulté le= parameter
     
     def __post_init__(self):
         if self.timeout <= 0:

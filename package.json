@@ -1,0 +1,80 @@
+{
+  "name": "OviX-desktop",
+  "version": "1.0.0",
+  "description": "OviX - Wikipedia Maintenance Tool Desktop Application",
+  "main": "electron/main.js",
+  "author": "Sabrsl",
+  "license": "MIT",
+  "homepage": "https://github.com/Sabrsl/OviX",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:electron\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:electron": "wait-on http://localhost:3000 && electron . --dev",
+    "build:frontend": "cd frontend && npm run build",
+    "build:electron": "electron-builder",
+    "build": "npm run build:frontend && npm run build:electron",
+    "build:win": "npm run build:frontend && electron-builder --win",
+    "build:portable": "npm run build:frontend && electron-builder --win portable",
+    "postinstall": "cd frontend && npm install"
+  },
+  "build": {
+    "appId": "com.ovix.desktop",
+    "productName": "OviX",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "backend/**/*",
+      "config/**/*",
+      "resources/**/*",
+      "requirements.txt",
+      "package.json"
+    ],
+    "extraFiles": [
+      {
+        "from": "config",
+        "to": "config",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "resources/python",
+        "to": "resources/python",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "resources/icon.ico",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OviX"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0"
+  },
+  "dependencies": {}
+}

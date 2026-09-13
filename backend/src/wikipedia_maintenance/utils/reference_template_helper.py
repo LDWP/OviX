@@ -1079,8 +1079,8 @@ class ReferenceTemplateHelper:
         else:
             domain_with_www = existing_site.strip()
 
-        # Remove www. for mapping lookup
-        domain = domain_with_www.replace('www.', '')
+        # DISABLED: Remove www. for mapping lookup - preserve www
+        domain = domain_with_www  # Keep www prefix
 
         # Try to get the mapped site name for the corrected domain.
         corrected_site = self._resolve_site_display_name(domain)
@@ -1535,11 +1535,12 @@ class ReferenceTemplateHelper:
         if pub_date_prose:
             trailing.append(pub_date_prose)
 
-        if not consulted_date:
-            consulted_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-        consulted_prose = self._format_date_prose(consulted_date)
-        if consulted_prose:
-            trailing.append(f'(consulté le {consulted_prose})')
+        # DISABLED: Auto-add consulté le date
+        # if not consulted_date:
+        #     consulted_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        # consulted_prose = self._format_date_prose(consulted_date)
+        # if consulted_prose:
+        #     trailing.append(f'(consulté le {consulted_prose})')
 
         if not trailing:
             return head

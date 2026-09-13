@@ -33,15 +33,39 @@ if sys.platform == 'win32':
 # backend/api/main.py -> project root (go up 3 levels)
 current_path = Path(__file__).resolve()
 PROJECT_ROOT = current_path.parent.parent.parent
+
+# Check if running in Electron desktop mode
+OVIX_USER_DATA = os.environ.get('OVIX_USER_DATA')
+OVIX_DATA_PATH = os.environ.get('OVIX_DATA_PATH')
+OVIX_LOGS_PATH = os.environ.get('OVIX_LOGS_PATH')
+OVIX_CONFIG_PATH = os.environ.get('OVIX_CONFIG_PATH')
+
+if OVIX_USER_DATA and all([OVIX_DATA_PATH, OVIX_LOGS_PATH, OVIX_CONFIG_PATH]):
+    # Electron desktop mode - use user data paths
+    print("Running in Electron desktop mode")
+    DATA_ROOT = Path(OVIX_DATA_PATH)
+    LOGS_ROOT = Path(OVIX_LOGS_PATH)
+    CONFIG_ROOT = Path(OVIX_CONFIG_PATH)
+    ENV_PATH = Path(OVIX_USER_DATA) / '.env'
+else:
+    # Development mode - use project paths
+    print("Running in development mode")
+    DATA_ROOT = PROJECT_ROOT / "data"
+    LOGS_ROOT = PROJECT_ROOT / "logs"
+    CONFIG_ROOT = PROJECT_ROOT / "config"
+    ENV_PATH = PROJECT_ROOT / '.env'
+
 os.environ['PROJECT_ROOT'] = str(PROJECT_ROOT.absolute())
+os.environ['DATA_ROOT'] = str(DATA_ROOT.absolute())
+os.environ['LOGS_ROOT'] = str(LOGS_ROOT.absolute())
+os.environ['CONFIG_ROOT'] = str(CONFIG_ROOT.absolute())
 
 # Load environment variables
-env_path = PROJECT_ROOT / '.env'
-if env_path.exists():
-    load_dotenv(env_path)
-    print(f"Loaded environment variables from {env_path}")
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH)
+    print(f"Loaded environment variables from {ENV_PATH}")
 else:
-    print(f".env file not found at {env_path}, trying default location")
+    print(f".env file not found at {ENV_PATH}, trying default location")
     load_dotenv()  # Try default location
 
 # Configure paths
@@ -50,8 +74,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / 'backend' / 'src'))
 
 # Configure logging
-log_dir = PROJECT_ROOT / "logs"
-log_dir.mkdir(exist_ok=True)
+log_dir = LOGS_ROOT
+log_dir.mkdir(parents=True, exist_ok=True)
 
 # Import logging configuration
 sys.path.insert(0, str(PROJECT_ROOT / 'utils'))

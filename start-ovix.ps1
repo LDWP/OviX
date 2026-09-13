@@ -12,8 +12,8 @@ if ($apiProcess) {
 }
 
 # Démarrer l'API FastAPI
-Write-Host "🚀 Démarrage de l'API FastAPI..." -ForegroundColor Blue
-$apiProcess = Start-Process -FilePath "python" -ArgumentList "-m", "uvicorn", "backend.api.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000" -PassThru -NoNewWindow
+Write-Host "Démarrage de l'API FastAPI..." -ForegroundColor Blue
+$apiProcess = Start-Process -FilePath "python" -ArgumentList "-m", "uvicorn", "backend.api.main:app", "--reload", "--host", "0.0.0.0", "--port", "8001" -PassThru -NoNewWindow
 Start-Sleep -Seconds 3
 
 # Vérifier si le frontend est déjà en cours
@@ -33,11 +33,11 @@ Pop-Location
 Start-Sleep -Seconds 3
 
 Write-Host ""
-Write-Host "✅ OVIX est maintenant en cours d'exécution!" -ForegroundColor Green
+Write-Host "OVIX est maintenant en cours d'execution!" -ForegroundColor Green
 Write-Host ""
-Write-Host "📍 Frontend: http://localhost:3000" -ForegroundColor Cyan
-Write-Host "📍 API: http://localhost:8000" -ForegroundColor Cyan
-Write-Host "📍 Documentation API: http://localhost:8000/docs" -ForegroundColor Cyan
+Write-Host "Frontend: http://localhost:3000" -ForegroundColor Cyan
+Write-Host "API: http://localhost:8001" -ForegroundColor Cyan
+Write-Host "Documentation API: http://localhost:8001/docs" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Appuyez sur Ctrl+C pour arrêter" -ForegroundColor Yellow
 
@@ -61,5 +61,5 @@ try {
         $frontendProcess | Stop-Process -Force
     }
     
-    Write-Host "✅ OVIX arrêté" -ForegroundColor Green
+    Write-Host "OVIX arrete" -ForegroundColor Green
 }

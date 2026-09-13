@@ -58,20 +58,20 @@ const navigation = [
     ],
   },
   {
-    name: 'Paramètres',
-    icon: Settings,
-    children: [
-      { name: 'Wikipedia', href: '/settings/wikipedia' },
-      { name: 'Général', href: '/settings' },
-    ],
-  },
-  {
     name: 'Domaines',
     icon: Globe,
     href: '/domains',
     children: [
       { name: 'Enrichissement', href: '/domains' },
       { name: 'Gestion', href: '/domains/management' },
+    ],
+  },
+  {
+    name: 'Paramètres',
+    icon: Settings,
+    children: [
+      { name: 'Wikipedia', href: '/settings/wikipedia' },
+      { name: 'Général', href: '/settings' },
     ],
   },
 ]
@@ -583,7 +583,7 @@ export default function Layout() {
               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1a1a1a'}
               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#161616'}
             >
-              <span style={{ position: 'relative', display: 'flex', width: '6px', height: '6px', flexShrink: 0 }}>
+              <span style={{ position: 'relative', display: 'flex', width: '4px', height: '4px', flexShrink: 0 }}>
                 {wikiConnected && !authLoading && (
                   <span style={{
                     position: 'absolute',
@@ -596,8 +596,8 @@ export default function Layout() {
                 )}
                 <span style={{
                   position: 'relative',
-                  width: '6px',
-                  height: '6px',
+                  width: '4px',
+                  height: '4px',
                   borderRadius: '50%',
                   backgroundColor: wikiDotColor
                 }} />

@@ -41,7 +41,7 @@ REFERENCE_PAGES: Final[Dict[str, List[str]]] = {
 # Action principale unique pour chaque type de correction (un seul libellé
 # par analyseur : plus de tirage aléatoire entre variantes équivalentes).
 ACTIONS: Final[Dict[str, str]] = {
-    "dead_link": "Réparation de liens morts (404/410)",
+    "dead_link": "réparation de liens morts",
     "http_link": "Sécurisation des liens (HTTPS)",
     "reference_enrichment": "Complément de références (site, date de consultation)",
     "case_normalization": "Harmonisation typographique (casse)",
@@ -150,14 +150,14 @@ def _build_ovix_summary(correction_counts: Dict[str, int], include_counts: bool 
         Résumé au format OviX avec ou sans compteurs.
     """
     if not correction_counts:
-        return f"Maintenance - {TEST_SIGNATURE}"
+        return "Maintenance"
 
     # Filtrer les corrections avec compteur > 0. Copie défensive: on ne
     # doit jamais muter le dict fourni par l'appelant.
     active_corrections = {k: v for k, v in correction_counts.items() if v > 0}
 
     if not active_corrections:
-        return f"Maintenance - {TEST_SIGNATURE}"
+        return "Maintenance"
 
     # Déterminer l'action principale selon PRIORITY_ORDER ; si aucun type
     # connu n'est présent, prendre le premier disponible.
@@ -201,10 +201,7 @@ def _build_ovix_summary(correction_counts: Dict[str, int], include_counts: bool 
         else action_with_count
     )
 
-    if unique_references:
-        references_str = " - ".join(unique_references)
-        return f"{action_str} - {references_str} - {TEST_SIGNATURE}"
-    return f"{action_str} - {TEST_SIGNATURE}"
+    return f"Bot - {action_str}"
 
 
 def get_summary(corrections_count: int = 0,
@@ -636,16 +633,13 @@ def get_summary_from_issues(
         
         # Ajouter dead_link avec format spécial
         if 'dead_link' in issue_types:
-            action_parts.append("Réparation de liens morts (404/410)")
-        
-        # Ajouter reference_enrichment avec format adapté
-        if 'reference_enrichment' in issue_types:
-            if 'dead_link' in issue_types:
-                # Avec dead_link: version courte "réf"
-                action_parts.append("réf")
+            n = issue_types['dead_link']
+            if n == 1:
+                action_parts.append("réparation d'1 lien mort")
             else:
-                # Seul: version complète "Complément de références (site, date de consultation)"
-                action_parts.append("Complément de références (site, date de consultation)")
+                action_parts.append(f"réparation de {n} liens morts")
+        
+        # DISABLED: reference_enrichment not added to summary when dead_link is present
         
         # Ajouter les autres corrections avec leurs compteurs
         other_issue_types = {k: v for k, v in issue_types.items() if k not in ['dead_link', 'reference_enrichment']}
@@ -664,89 +658,9 @@ def get_summary_from_issues(
         
         # Construire le résumé final
         action_str = ", ".join(action_parts)
-        if unique_references:
-            references_str = " - ".join(unique_references)
-            base_summary = f"{action_str} - {references_str} - {TEST_SIGNATURE}"
-        else:
-            base_summary = f"{action_str} - {TEST_SIGNATURE}"
+        base_summary = f"Bot - {action_str}"
     else:
-        base_summary = _build_ovix_summary(dict(issue_types), include_counts=True)
+        return _build_ovix_summary(dict(issue_types), include_counts=False)
 
-    # Construire le commentaire avec les compteurs pour chaque type
-    comment_parts = []
-    if 'dead_link' in issue_types:
-        n = issue_types['dead_link']
-        comment_parts.append(f"{n} lien{'s' if n > 1 else ''} mort{'s' if n > 1 else ''} réparé{'s' if n > 1 else ''}")
-    if 'reference_enrichment' in issue_types:
-        n = issue_types['reference_enrichment']
-        comment_parts.append(f"{n} référence{'s' if n > 1 else ''} enrichie{'s' if n > 1 else ''}")
-    if 'case_normalization' in issue_types:
-        n = issue_types['case_normalization']
-        comment_parts.append(f"casse ({n})")
-    if 'http_link' in issue_types:
-        n = issue_types['http_link']
-        comment_parts.append(f"HTTPS ({n})")
-    if 'bare_url' in issue_types:
-        n = issue_types['bare_url']
-        comment_parts.append(f"liens nus ({n})")
-    if 'duplicate_refs' in issue_types:
-        n = issue_types['duplicate_refs']
-        comment_parts.append(f"doublons ({n})")
-    if 'uppercase_parameter' in issue_types:
-        n = issue_types['uppercase_parameter']
-        comment_parts.append(f"majuscules ({n})")
-    if 'invalid_isbn' in issue_types:
-        n = issue_types['invalid_isbn']
-        comment_parts.append(f"ISBN ({n})")
-    if 'template_type' in issue_types:
-        n = issue_types['template_type']
-        comment_parts.append(f"modèles ({n})")
-    if 'broken_link' in issue_types:
-        n = issue_types['broken_link']
-        comment_parts.append(f"liens brisés ({n})")
-    if 'typo' in issue_types:
-        n = issue_types['typo']
-        comment_parts.append(f"typo ({n})")
-    if 'correction' in issue_types:
-        n = issue_types['correction']
-        comment_parts.append(f"corrections ({n})")
-
-    # Construire le commentaire final. Les détails de chaque catégorie
-    # (liens morts, enrichissements) sont affichés avec des étiquettes claires
-    # pour éviter toute confusion.
-    #
-    # NOTE IMPORTANTE: dead_link_mapping et enrichment_mapping sont déjà
-    # triés (liens internes en tête) et tronqués à MAX_DETAIL_ITEMS (avec
-    # "..." déjà ajouté si besoin) par _detect_dead_link_mapping /
-    # _detect_enrichment_mapping. On les utilise donc ICI tels quels, sans
-    # re-trancher ni rajouter un second "...", pour éviter un double "......"
-    # dans le commentaire final.
-    comment = ""
-    if comment_parts:
-        comment = " - ".join(comment_parts)
-
-        detail_parts = []
-        if dead_link_mapping:
-            dead_link_details = ", ".join(dead_link_mapping)
-            detail_parts.append(dead_link_details)
-
-        if enrichment_mapping:
-            enrichment_details = ", ".join(enrichment_mapping)
-            detail_parts.append(enrichment_details)
-            logger.info(f"Enrichment details added to comment: {enrichment_mapping}")
-        else:
-            logger.info("Enrichment mapping is empty, no details to add")
-
-        if brise_le_mapping:
-            brise_le_details = ", ".join(brise_le_mapping)
-            detail_parts.append(brise_le_details)
-            logger.info(f"Brise le details added to comment: {brise_le_mapping}")
-
-        if detail_parts:
-            comment += " : " + " - ".join(detail_parts)
-
-    # Combiner le résumé de base avec le commentaire
-    if comment:
-        return f"{base_summary} : {comment}"
-    else:
-        return base_summary
+    # DISABLED: No detailed comments, just return the base summary
+    return base_summary

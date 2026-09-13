@@ -164,6 +164,19 @@ test_*.py.tmp
 .pytest_cache/
 
 # -----------------------------------------------------
+# Node.js / Electron
+# -----------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+out/
+build/
+*.local
+
+# -----------------------------------------------------
 # Reports and documentation temporary
 # -----------------------------------------------------
 RAPPORT_*.md
