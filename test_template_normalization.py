@@ -24,16 +24,16 @@ def test_normalize_template_name():
     print("Testing _normalize_template_name...")
     
     test_cases = [
-        ("Lien web", "lien web"),
-        ("lien web", "lien web"),
-        ("lien_web", "lien web"),
-        ("Lien_Web", "lien web"),
-        ("Lien _ web", "lien web"),  # Multiple spaces collapse
-        ("  Lien  web  ", "lien web"),  # Leading/trailing/multiple spaces
-        ("Cite web", "cite web"),
-        ("cite_web", "cite web"),
-        ("Article", "article"),
-        ("Ouvrage", "ouvrage"),
+        ('Lien web', 'lien web'),
+        ('lien web', 'lien web'),
+        ('lien_web', 'lien web'),
+        ('Lien_Web', 'lien Web'),  # MediaWiki: first char lowercase only
+        ('Lien _ web', 'lien web'),
+        ('  Lien  web  ', 'lien web'),
+        ('Cite web', 'cite web'),
+        ('cite_web', 'cite web'),
+        ('Article', 'article'),
+        ('Ouvrage', 'ouvrage'),
     ]
     
     all_passed = True
@@ -111,13 +111,13 @@ def test_template_reconstruction_case_preservation():
     return all_passed
 
 
-def test_validator_prevents_case_changes():
-    """Test that validator prevents unnecessary case-only changes."""
-    print("\nTesting template replacement validator...")
+def test_validator_allows_case_changes():
+    """Test that validator allows case changes (bot should not interfere with casing)."""
+    print("\nTesting validator allows case changes...")
     
     validator = TemplateReplacementValidator()
     
-    # Test case: lien web → Lien web should be rejected (unnecessary case change)
+    # Test case: lien web → Lien web should be accepted (bot does not interfere with casing)
     old_content = "Some text {{lien web|url=http://example.com}} more text"
     new_content = "Some text {{Lien web|url=http://example.com}} more text"
     old_template_start = old_content.find("{{")
@@ -131,12 +131,12 @@ def test_validator_prevents_case_changes():
         normalize_name_func=ReferenceTemplateHelper._get_canonical_template_name
     )
     
-    if not is_valid:
-        print(f"  [PASS] Case change 'lien web' -> 'Lien web' correctly rejected")
-        print(f"    Reason: {error_msg}")
+    if is_valid:
+        print(f"  [PASS] Case change 'lien web' -> 'Lien web' correctly accepted")
         return True
     else:
-        print(f"  [FAIL] Case change 'lien web' -> 'Lien web' incorrectly accepted")
+        print(f"  [FAIL] Case change 'lien web' -> 'Lien web' incorrectly rejected")
+        print(f"    Reason: {error_msg}")
         return False
 
 
@@ -207,7 +207,7 @@ def main():
     results.append(("Normalization", test_normalize_template_name()))
     results.append(("Canonical name", test_get_canonical_template_name()))
     results.append(("Case preservation", test_template_reconstruction_case_preservation()))
-    results.append(("Validator blocks case changes", test_validator_prevents_case_changes()))
+    results.append(("Validator allows case changes", test_validator_allows_case_changes()))
     results.append(("Validator allows conversions", test_validator_allows_legitimate_conversions()))
     results.append(("KNOWN_TEMPLATE_NAMES mapping", test_known_template_names_mapping()))
     

@@ -481,7 +481,7 @@ class ReferenceTemplateHelper:
         - Underscores and spaces are equivalent
         - Multiple spaces are collapsed to single spaces
         - Leading/trailing spaces are trimmed
-        - Case is normalized to lowercase
+        - Case is normalized to lowercase ONLY for the first character (MediaWiki behavior)
 
         This ensures that all set lookups (TEMPLATES_SUPPORTING_*, etc.)
         work consistently regardless of input format.
@@ -490,14 +490,15 @@ class ReferenceTemplateHelper:
             name: Template name (e.g., "Lien web", "lien_web", "Lien_Web", "Lien _ web")
 
         Returns:
-            Normalized lowercase name with single spaces (e.g., "lien web")
+            Normalized name with single spaces and first character lowercase (e.g., "lien web")
         """
         # Replace underscores with spaces (MediaWiki treats them as equivalent)
         with_spaces = name.replace('_', ' ')
-        # Convert to lowercase
-        lowercased = with_spaces.lower()
         # Collapse multiple spaces to single space (MediaWiki behavior)
-        collapsed = ' '.join(lowercased.split())
+        collapsed = ' '.join(with_spaces.split())
+        # Normalize only first character to lowercase (MediaWiki behavior)
+        if collapsed:
+            return collapsed[0].lower() + collapsed[1:]
         return collapsed
 
     @staticmethod
@@ -509,7 +510,10 @@ class ReferenceTemplateHelper:
         If the name is not in the mapping, returns the normalized name as-is.
 
         Uses _normalize_template_name for robust normalization (handles
-        multiple spaces, underscores, etc. consistently with MediaWiki behavior).
+        underscores/spaces equivalence and first-character case normalization).
+
+        For lookup, normalizes both the input and the dictionary keys to ensure
+        compatibility with the MediaWiki-faithful normalization (first char lowercase only).
 
         Args:
             name: Template name (e.g., "cite web", "Lien web", "lien_web", "Lien _ web")
@@ -518,7 +522,17 @@ class ReferenceTemplateHelper:
             Canonical template name (e.g., "Lien web" for "cite web" if mapped)
         """
         normalized = ReferenceTemplateHelper._normalize_template_name(name)
-        return ReferenceTemplateHelper.KNOWN_TEMPLATE_NAMES.get(normalized, normalized)
+        
+        # Try direct lookup first
+        if normalized in ReferenceTemplateHelper.KNOWN_TEMPLATE_NAMES:
+            return ReferenceTemplateHelper.KNOWN_TEMPLATE_NAMES[normalized]
+        
+        # Fallback: normalize dictionary keys for lookup (handles case variations)
+        for key, value in ReferenceTemplateHelper.KNOWN_TEMPLATE_NAMES.items():
+            if ReferenceTemplateHelper._normalize_template_name(key) == normalized:
+                return value
+        
+        return normalized
 
     @staticmethod
     def _get_param_any(parameters: Dict[str, str], variants: tuple) -> Optional[str]:
