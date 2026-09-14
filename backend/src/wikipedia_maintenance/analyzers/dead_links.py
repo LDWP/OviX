@@ -46,6 +46,7 @@ from wikipedia_maintenance.utils.retry_handler import RetryConfig, RetryHandler,
 # Phase 1: Tracking Service imports
 from wikipedia_maintenance.utils.tracking_service import TrackingService, DeadLinkOperation, compute_idempotency_key, normalize_url
 from wikipedia_maintenance.utils.database import DatabaseManager
+from wikipedia_maintenance.utils.tracking_param_remover import TrackingParamRemover
 # CandidateFinder currently unused - reserved for future multi-strategy candidate search
 # from ..utils.candidate_finder import CandidateFinder
 
@@ -115,6 +116,7 @@ class DeadLinkAnalyzer(BaseAnalyzer):
         self.lien_web_helper = LienWebHelper()
         self.reference_template_helper = ReferenceTemplateHelper()
         self.bare_url_helper = BareUrlHelper()
+        self.tracking_param_remover = TrackingParamRemover()
         # CandidateFinder currently unused - reserved for future multi-strategy candidate search
         # self.candidate_finder = CandidateFinder(timeout=self.timeout)
 
@@ -751,6 +753,9 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                 elif cached_decision.get('decision') == 'REPLACEMENT_CONFIRMED' and self.enable_auto_repair:
                     old_url = url
                     new_url = cached_decision.get('replacement_url')
+                    
+                    # Remove tracking parameters from replacement URL
+                    new_url = self.tracking_param_remover.remove_tracking_params(new_url)
 
                     replacement_result = self.safe_url_replacer.replace_exact_occurrence(
                         content, old_url, new_url, url_position
@@ -990,6 +995,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                         if archive_repair_result and archive_repair_result.decision == RepairDecision.REPLACEMENT_CONFIRMED:
                             # Update only the archive URL in the template
                             new_archive_url = archive_repair_result.replacement_url
+                            # Remove tracking parameters from archive URL
+                            new_archive_url = self.tracking_param_remover.remove_tracking_params(new_archive_url)
                             new_archive_date = archive_repair_result.details.get('archive_date')
                             provider = archive_repair_result.details.get('provider')
 
@@ -1190,6 +1197,9 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                 if repair_result and repair_result.decision == RepairDecision.REPLACEMENT_CONFIRMED:
                     old_url = url
                     new_url = repair_result.replacement_url
+                    
+                    # Remove tracking parameters from replacement URL
+                    new_url = self.tracking_param_remover.remove_tracking_params(new_url)
 
                     # Check if this is a reference template repair (Lien web, article, ouvrage, etc.)
                     is_reference_template_repair = False
@@ -1209,6 +1219,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                                 # This preserves manual metadata (titre, auteur, éditeur, série, collection)
                                 if repair_result and repair_result.decision == RepairDecision.REPLACEMENT_CONFIRMED:
                                     archive_url = repair_result.details.get('archive_url')
+                                    # Remove tracking parameters from archive URL
+                                    archive_url = self.tracking_param_remover.remove_tracking_params(archive_url)
                                     archive_date = repair_result.details.get('archive_date')
                                     provider = repair_result.details.get('provider')
 
@@ -1613,6 +1625,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
             return None
 
         archive_url = archive_result.archive_url
+        # Remove tracking parameters from archive URL
+        archive_url = self.tracking_param_remover.remove_tracking_params(archive_url)
         archive_date = archive_result.archive_date
         provider_name = archive_result.provider
 
@@ -1736,6 +1750,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
                             logger.info(f"ARCHIVE_VERIFICATION_FALLBACK_SUCCESS | url={url} | provider={alt_provider} | archive_url={alt_archive_url}")
                             # Use alternative provider's archive instead
                             archive_url = alt_archive_url
+                            # Remove tracking parameters from archive URL
+                            archive_url = self.tracking_param_remover.remove_tracking_params(archive_url)
                             provider_name = alt_provider
                             archive_date = alt_result.archive_date
                             archive_check = alt_check  # Update archive_check to reflect successful verification
@@ -2238,6 +2254,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
         # This handles cases where the URL wasn't detected as a bare URL but we still have archive data
         if repair_result and repair_result.details:
             archive_url = repair_result.details.get('archive_url', new_url)
+            # Remove tracking parameters from archive URL
+            archive_url = self.tracking_param_remover.remove_tracking_params(archive_url)
             archive_date = repair_result.details.get('archive_date')
             provider = repair_result.details.get('provider')
             
@@ -2296,6 +2314,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
         # If no archive info, use new_url as archive_url and generate a date
         if not archive_url:
             archive_url = new_url
+            # Remove tracking parameters from archive URL
+            archive_url = self.tracking_param_remover.remove_tracking_params(archive_url)
         if not archive_date:
             # Use current date as fallback
             from datetime import datetime
@@ -2350,6 +2370,8 @@ class DeadLinkAnalyzer(BaseAnalyzer):
 
         # Ultimate fallback: simple URL replacement (should rarely reach here)
         logger.warning(f"ULTIMATE_FALLBACK_TO_RAW_URL | url={old_url[:80]}")
+        # Remove tracking parameters from replacement URL
+        new_url = self.tracking_param_remover.remove_tracking_params(new_url)
         replacement_result = self.safe_url_replacer.replace_exact_occurrence(
             content, old_url, new_url, url_position
         )
